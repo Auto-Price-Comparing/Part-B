@@ -11,16 +11,40 @@ object MatcherRules {
     /** 所有空白字符（含全角空格转半角后的普通空格）。 */
     val WHITESPACE_REGEX = Regex("""\s+""")
 
-    /** 商品名模糊配对阈值：字符二元组 Jaccard 相似度 ≥ 该值才允许配对。 */
-    const val ITEM_SIMILARITY_THRESHOLD = 0.5
+    /** 相似度 ≥ 该值自动配对（三级判定设计移植自 C 侧，算法仍用本仓库的 Jaccard bigram）。 */
+    const val AUTO_MATCH_THRESHOLD = 0.85
+
+    /** 相似度在 [本值, [AUTO_MATCH_THRESHOLD]) 区间进入待确认，由用户人工配对（见 MatchMemory）。 */
+    const val CONFIRM_MATCH_THRESHOLD = 0.6
 }
 // ============================================================================
 
+/** 单条商品配对结果：[b] 为 null 表示 a 侧商品在另一侧无对应（未配上）。 */
+data class ItemMatch(
+    val a: ItemPrice,
+    val b: ItemPrice?,
+    val similarity: Double,
+    val needsConfirm: Boolean,
+)
+
 /**
- * 同店同品匹配器 —— M2 版。
- * M2 在归一化完全相等配对之上引入相似度兜底：未配对商品按字符二元组
- * Jaccard 相似度二次配对（阈值见 [MatcherRules.ITEM_SIMILARITY_THRESHOLD]）；
- * 只做文本相似度，不做拼音；公开接口保持不变。
+ * 同品配对总结果：
+ * - [auto]：可直接参与计价的配对（完全相等 / 高相似度 / 用户已确认），顺序以 a 的商品顺序为准；
+ * - [pending]：相似度落在待确认区间的疑似配对，等用户确认后才进 [auto]；
+ * - [unmatchedA]：另一侧完全无对应的 a 侧商品。
+ */
+data class MatchResult(
+    val auto: List<Pair<ItemPrice, ItemPrice>>,
+    val pending: List<ItemMatch>,
+    val unmatchedA: List<ItemPrice>,
+)
+
+/**
+ * 同店同品匹配器 —— 确认配对版（整合 C 侧设计）。
+ * 三级判定：归一化完全相等 / Jaccard ≥ [MatcherRules.AUTO_MATCH_THRESHOLD] → 自动配对；
+ * ≥ [MatcherRules.CONFIRM_MATCH_THRESHOLD] → 待用户确认；低于 → 不配对。
+ * 用户确认过的配对（[confirmed]，归一化名对）直接按自动配对处理。
+ * 只做文本相似度，不做拼音。
  */
 object StoreMatcher {
 
@@ -41,37 +65,63 @@ object StoreMatcher {
             .filter { it.isNotEmpty() }
 
     /**
-     * 同店两平台间商品配对：先按归一化商品名完全相等配对（一侧重名只取第一个）；
-     * 未配上的 a 侧商品再在 b 侧剩余商品中找相似度最高且 ≥ 阈值者配对，
-     * 每个 b 商品最多配对一次。返回顺序以 a 的商品顺序为准。
+     * 同店两平台间商品配对，每个 b 商品最多被（自动或待确认）占用一次：
+     * 1. 归一化完全相等配对（一侧重名只取第一个）；
+     * 2. [confirmed] 中的用户确认对直接配对（覆盖相似度判定）；
+     * 3. 剩余商品按 Jaccard 相似度贪心配对，按三级阈值分流到 auto / pending / 不匹配。
      */
-    fun matchItems(a: StoreInfo, b: StoreInfo): List<Pair<ItemPrice, ItemPrice>> {
-        // 第一遍：归一化后完全相等配对（M1 原有行为）
+    fun matchItems(
+        a: StoreInfo,
+        b: StoreInfo,
+        confirmed: Set<Pair<String, String>> = emptySet(),
+    ): MatchResult {
+        val auto = MutableList<Pair<ItemPrice, ItemPrice>?>(a.items.size) { null }
+        val pendingByIndex = MutableList<ItemMatch?>(a.items.size) { null }
+        val usedB = BooleanArray(b.items.size)
+
+        // 第一遍：归一化后完全相等配对
         val bIndexByName = mutableMapOf<String, Int>()
         b.items.forEachIndexed { index, item -> bIndexByName.putIfAbsent(normalizeName(item.name), index) }
-        val usedB = BooleanArray(b.items.size)
-        val pairs = MutableList<Pair<ItemPrice, ItemPrice>?>(a.items.size) { null }
         a.items.forEachIndexed { i, itemA ->
             val j = bIndexByName[normalizeName(itemA.name)]
             if (j != null) {
                 usedB[j] = true
-                pairs[i] = itemA to b.items[j]
+                auto[i] = itemA to b.items[j]
             }
         }
-        // 第二遍：相似度兜底，每个 b 商品最多用一次
+
+        // 第二遍：用户确认对直通（归一化名对命中即配）
+        a.items.forEachIndexed { i, itemA ->
+            if (auto[i] != null) return@forEachIndexed
+            val normA = normalizeName(itemA.name)
+            val j = b.items.indices.firstOrNull { k ->
+                !usedB[k] && (normA to normalizeName(b.items[k].name)) in confirmed
+            }
+            if (j != null) {
+                usedB[j] = true
+                auto[i] = itemA to b.items[j]
+            }
+        }
+
+        // 第三遍：相似度贪心，按三级阈值分流
         val unmatchedB = b.items.indices.filter { !usedB[it] }.toMutableList()
         a.items.forEachIndexed { i, itemA ->
-            if (pairs[i] != null) return@forEachIndexed
+            if (auto[i] != null) return@forEachIndexed
             val best = unmatchedB
                 .map { it to itemSimilarity(itemA.name, b.items[it].name) }
-                .filter { it.second >= MatcherRules.ITEM_SIMILARITY_THRESHOLD }
-                .maxByOrNull { it.second }
-            if (best != null) {
-                unmatchedB.remove(best.first)
-                pairs[i] = itemA to b.items[best.first]
+                .filter { it.second >= MatcherRules.CONFIRM_MATCH_THRESHOLD }
+                .maxByOrNull { it.second } ?: return@forEachIndexed
+            unmatchedB.remove(best.first)
+            usedB[best.first] = true
+            if (best.second >= MatcherRules.AUTO_MATCH_THRESHOLD) {
+                auto[i] = itemA to b.items[best.first]
+            } else {
+                pendingByIndex[i] = ItemMatch(itemA, b.items[best.first], best.second, needsConfirm = true)
             }
         }
-        return pairs.filterNotNull()
+
+        val unmatchedA = a.items.filterIndexed { i, _ -> auto[i] == null && pendingByIndex[i] == null }
+        return MatchResult(auto.filterNotNull(), pendingByIndex.filterNotNull(), unmatchedA)
     }
 
     /**

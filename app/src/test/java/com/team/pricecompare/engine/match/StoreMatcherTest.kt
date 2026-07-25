@@ -7,7 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 纯 Kotlin 单测：归一化、同店分组、同品配对（不依赖 Android 运行时）。
+ * 纯 Kotlin 单测：归一化、同店分组、同品三级配对（不依赖 Android 运行时）。
  */
 class StoreMatcherTest {
 
@@ -63,7 +63,7 @@ class StoreMatcherTest {
     }
 
     @Test
-    fun `同名商品跨平台配对`() {
+    fun `同名商品跨平台自动配对`() {
         val a = store(
             "meituan", "老乡鸡",
             items = listOf(
@@ -79,40 +79,82 @@ class StoreMatcherTest {
                 ItemPrice("老母鸡汤", 14.5, 0.0),
             ),
         )
-        val pairs = StoreMatcher.matchItems(a, b)
-        assertEquals(2, pairs.size)
-        assertEquals("香辣鸡腿堡", pairs[0].first.name)
-        assertEquals("香辣鸡腿堡 ", pairs[0].second.name)
-        assertEquals("老母鸡汤", pairs[1].first.name)
+        val result = StoreMatcher.matchItems(a, b)
+        assertEquals(2, result.auto.size)
+        assertEquals("香辣鸡腿堡", result.auto[0].first.name)
+        assertEquals("香辣鸡腿堡 ", result.auto[0].second.name)
+        assertEquals("老母鸡汤", result.auto[1].first.name)
+        assertEquals(listOf("独占菜"), result.unmatchedA.map { it.name })
     }
 
     @Test
-    fun `无同名商品时配对为空`() {
+    fun `无同名且不相似的商品不配对`() {
         val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("鸡腿堡", 1.0, 0.0)))
         val b = store("flash", "老乡鸡", items = listOf(ItemPrice("牛肉粉", 2.0, 0.0)))
-        assertTrue(StoreMatcher.matchItems(a, b).isEmpty())
+        val result = StoreMatcher.matchItems(a, b)
+        assertTrue(result.auto.isEmpty())
+        assertTrue(result.pending.isEmpty())
+        assertEquals(1, result.unmatchedA.size)
     }
 
     @Test
-    fun `相似商品名可模糊配对`() {
+    fun `高相似度商品自动配对`() {
+        // bigram 相似度 7/8 ≈ 0.875 ≥ AUTO_MATCH_THRESHOLD
+        val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("招牌肥西老母鸡汤面", 18.0, 0.0)))
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("招牌肥西老母鸡汤", 17.0, 0.0)))
+        val result = StoreMatcher.matchItems(a, b)
+        assertEquals(1, result.auto.size)
+        assertTrue(result.pending.isEmpty())
+    }
+
+    @Test
+    fun `中等相似度商品进入待确认`() {
+        // bigram 相似度 5/7 ≈ 0.714，落在 [CONFIRM, AUTO) 区间
         val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("招牌肥西老母鸡汤", 18.0, 0.0)))
         val b = store("flash", "老乡鸡", items = listOf(ItemPrice("肥西老母鸡汤", 17.0, 0.0)))
-        val pairs = StoreMatcher.matchItems(a, b)
-        assertEquals(1, pairs.size)
-        assertEquals("招牌肥西老母鸡汤", pairs[0].first.name)
-        assertEquals("肥西老母鸡汤", pairs[0].second.name)
+        val result = StoreMatcher.matchItems(a, b)
+        assertTrue(result.auto.isEmpty())
+        assertEquals(1, result.pending.size)
+        val pending = result.pending[0]
+        assertEquals("招牌肥西老母鸡汤", pending.a.name)
+        assertEquals("肥西老母鸡汤", pending.b?.name)
+        assertTrue(pending.needsConfirm)
+        assertTrue(pending.similarity >= MatcherRules.CONFIRM_MATCH_THRESHOLD)
+        assertTrue(pending.similarity < MatcherRules.AUTO_MATCH_THRESHOLD)
     }
 
     @Test
-    fun `完全不相关的商品模糊配对不上`() {
-        val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("香辣鸡腿堡", 10.0, 0.0)))
-        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("红烧牛肉面", 10.0, 0.0)))
-        assertTrue(StoreMatcher.matchItems(a, b).isEmpty())
+    fun `用户确认过的配对直通自动配对`() {
+        val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("招牌肥西老母鸡汤", 18.0, 0.0)))
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("肥西老母鸡汤", 17.0, 0.0)))
+        // 确认记忆使用归一化后的名对
+        val confirmed = setOf("招牌肥西老母鸡汤" to "肥西老母鸡汤")
+        val result = StoreMatcher.matchItems(a, b, confirmed)
+        assertEquals(1, result.auto.size)
+        assertEquals("肥西老母鸡汤", result.auto[0].second.name)
+        assertTrue(result.pending.isEmpty())
+    }
+
+    @Test
+    fun `待确认配对同样占用 b 侧商品`() {
+        // b 侧只有一个候选，两个相似的 a 商品只能有一个进入 pending
+        val a = store(
+            "meituan", "老乡鸡",
+            items = listOf(
+                ItemPrice("招牌肥西老母鸡汤", 18.0, 0.0),
+                ItemPrice("肥西老母鸡汤大份", 20.0, 0.0),
+            ),
+        )
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("肥西老母鸡汤", 17.0, 0.0)))
+        val result = StoreMatcher.matchItems(a, b)
+        assertTrue(result.auto.isEmpty())
+        assertEquals(1, result.pending.size)
+        assertEquals(1, result.unmatchedA.size)
     }
 
     @Test
     fun `一个 b 商品不会被重复配对`() {
-        // 「老母鸡汤」先完全相等占掉 b 侧唯一商品，「招牌老母鸡汤」模糊配对无路可走
+        // 「老母鸡汤」先完全相等占掉 b 侧唯一商品，「招牌老母鸡汤」配对无路可走
         val a = store(
             "meituan", "老乡鸡",
             items = listOf(
@@ -121,9 +163,10 @@ class StoreMatcherTest {
             ),
         )
         val b = store("flash", "老乡鸡", items = listOf(ItemPrice("老母鸡汤", 14.0, 0.0)))
-        val pairs = StoreMatcher.matchItems(a, b)
-        assertEquals(1, pairs.size)
-        assertEquals("老母鸡汤", pairs[0].first.name)
+        val result = StoreMatcher.matchItems(a, b)
+        assertEquals(1, result.auto.size)
+        assertEquals("老母鸡汤", result.auto[0].first.name)
+        assertTrue(result.pending.isEmpty())
     }
 
     @Test
@@ -133,10 +176,10 @@ class StoreMatcherTest {
         assertEquals(1.0, StoreMatcher.itemSimilarity("老母鸡汤", " 老母鸡汤（小份）"), 0.0001)
         // 完全不相关接近 0
         assertTrue(StoreMatcher.itemSimilarity("鸡腿堡", "牛肉粉") < 0.1)
-        // 前缀差异但主体相同的相似度应达到模糊配对阈值
+        // 前缀差异但主体相同的相似度应达到待确认阈值
         assertTrue(
             StoreMatcher.itemSimilarity("招牌肥西老母鸡汤", "肥西老母鸡汤") >=
-                MatcherRules.ITEM_SIMILARITY_THRESHOLD,
+                MatcherRules.CONFIRM_MATCH_THRESHOLD,
         )
     }
 }

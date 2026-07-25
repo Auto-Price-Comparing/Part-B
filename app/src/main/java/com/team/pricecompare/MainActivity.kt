@@ -20,6 +20,7 @@ import com.team.pricecompare.engine.data.CouponRepository
 import com.team.pricecompare.engine.data.SnapshotRepository
 import com.team.pricecompare.launcher.AppLauncher
 import com.team.pricecompare.launcher.LaunchResult
+import com.team.pricecompare.overlay.OverlayController
 import com.team.pricecompare.overlay.OverlayService
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -104,14 +105,20 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 悬浮窗权限从系统设置返回后，这里完成「无障碍开 + 权限足 → 自动起悬浮窗」闭环
+        OverlayController.ensureService(this)
         refreshStatus()
         refreshCoupons()
     }
 
     private fun refreshStatus() {
+        val a11yOn = OverlayController.accessibilityEnabled.value
         val serviceAlive = DumpAccessibilityService.instance != null
-        val serviceStatus =
-            if (serviceAlive) "运行中" else "未运行（可能被系统杀死，请重新开启）"
+        val serviceStatus = when {
+            !a11yOn -> "未开启（请在系统设置中开启）"
+            serviceAlive -> "运行中"
+            else -> "已开启但服务未存活（可能被系统杀死，请重新开关一次）"
+        }
         val foreground = DumpAccessibilityService.foregroundPackage ?: "未知（无障碍服务未开启？）"
         val dump = DumpAccessibilityService.lastDumpFile ?: "暂无 dump"
         val compare = CaptureHub.lastSummary

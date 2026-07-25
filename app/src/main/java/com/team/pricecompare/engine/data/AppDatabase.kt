@@ -31,6 +31,15 @@ data class CouponEntity(
     val createdAt: Long,
 )
 
+/** 用户确认过的商品配对（归一化后的商品名对），确认一次永久生效。 */
+@Entity(tableName = "product_matches")
+data class ProductMatchEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val nameA: String, // 归一化后的 a 侧商品名
+    val nameB: String, // 归一化后的 b 侧商品名
+    val createdAt: Long,
+)
+
 @Dao
 interface StoreSnapshotDao {
     @Insert
@@ -69,16 +78,35 @@ interface CouponDao {
     suspend fun all(): List<CouponEntity>
 }
 
+@Dao
+interface ProductMatchDao {
+    @Insert
+    suspend fun insert(match: ProductMatchEntity)
+
+    /** 查重：同一归一化名对只存一次（修复 C 侧 confirm 不去重的缺陷）。 */
+    @Query("SELECT COUNT(*) FROM product_matches WHERE nameA = :nameA AND nameB = :nameB")
+    suspend fun count(nameA: String, nameB: String): Int
+
+    @Query("SELECT * FROM product_matches")
+    suspend fun all(): List<ProductMatchEntity>
+}
+
 /**
  * M 阶段使用 fallbackToDestructiveMigration：数据可丢，升级直接清库重建。
  * 正式版发布前必须改写为显式 Migration。
  */
-@Database(entities = [StoreSnapshot::class, CouponEntity::class], version = 2, exportSchema = false)
+@Database(
+    entities = [StoreSnapshot::class, CouponEntity::class, ProductMatchEntity::class],
+    version = 3,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun storeDao(): StoreSnapshotDao
 
     abstract fun couponDao(): CouponDao
+
+    abstract fun productMatchDao(): ProductMatchDao
 
     companion object {
         @Volatile

@@ -1,8 +1,12 @@
 package com.team.pricecompare.overlay
 
 import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.IBinder
@@ -14,6 +18,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.app.ServiceCompat
 import com.team.pricecompare.Deal
 import com.team.pricecompare.R
 import com.team.pricecompare.engine.CaptureHub
@@ -54,6 +59,9 @@ private object OverlayStyle {
  * 数据来源：直接订阅 [CaptureHub.state]（M5 起；原 companion 变量 + ACTION_REFRESH
  * 协议无人接线，已删除）。四种 [OverlayState] 各自渲染，任何状态下都不崩溃；
  * 可拖动；关闭按钮 stopSelf()。
+ *
+ * C 侧整合起转为前台服务（specialUse 类型 + 低重要性通知），配合
+ * [OverlayController] 按无障碍开关自动启停，提升保活能力。
  */
 class OverlayService : Service() {
 
@@ -64,8 +72,29 @@ class OverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startForegroundWithNotification()
         showCard()
         return START_STICKY
+    }
+
+    /** Android 14 合规：specialUse 类型前台服务，低重要性通知不打扰用户。 */
+    private fun startForegroundWithNotification() {
+        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_ID, "比价悬浮窗", NotificationManager.IMPORTANCE_MIN),
+            )
+        }
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentText("比价悬浮窗运行中")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .build()
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+        )
     }
 
     @SuppressLint("ClickableViewAccessibility", "InflateParams")
@@ -154,7 +183,11 @@ class OverlayService : Service() {
                 state.deals.forEach { deal ->
                     container.addView(buildDealRow(deal, isBest = deal.finalPrice == bestPrice))
                 }
-                container.addView(buildHintRow("已匹配 ${state.matchedItemCount} 件同品"))
+                val hint = buildString {
+                    append("已匹配 ${state.matchedItemCount} 件同品")
+                    if (state.pending.isNotEmpty()) append(" · ${state.pending.size} 对疑似同品待确认")
+                }
+                container.addView(buildHintRow(hint))
             }
         }
     }
@@ -219,5 +252,10 @@ class OverlayService : Service() {
         cardView?.let { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) }
         cardView = null
         super.onDestroy()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "overlay_fgs"
+        private const val NOTIFICATION_ID = 1
     }
 }

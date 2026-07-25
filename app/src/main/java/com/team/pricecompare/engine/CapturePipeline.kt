@@ -8,6 +8,7 @@ import com.team.pricecompare.accessibility.PageType
 import com.team.pricecompare.accessibility.SimpleNode
 import com.team.pricecompare.engine.data.AppDatabase
 import com.team.pricecompare.engine.data.CouponRepository
+import com.team.pricecompare.engine.data.MatchMemory
 import com.team.pricecompare.engine.data.StoreInfoCodec
 import com.team.pricecompare.engine.data.StoreSnapshot
 import com.team.pricecompare.engine.match.StoreMatcher
@@ -16,6 +17,7 @@ import com.team.pricecompare.engine.pricing.Coupon
 import com.team.pricecompare.engine.pricing.PricingEngine
 import com.team.pricecompare.parsers.FlashParser
 import com.team.pricecompare.parsers.MeituanParser
+import com.team.pricecompare.parsers.safeParse
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,19 +84,50 @@ object CapturePipeline {
                     else CaptureHub.publishSingle(store, deal)
                     return
                 }
-                // 跨平台场景：以匹配上的同品各一件为购物车，两平台分别计价
-                val matched = StoreMatcher.matchItems(store, counterpart)
-                val cart = matched.map { CartItem(it.first.name, 1) }
-                val deals = PricingEngine.bestDeal(listOf(store, counterpart), cart, coupons)
-                if (deals.isEmpty()) {
-                    CaptureHub.publishUnsupported("两平台均无法计算实付价")
-                    return
-                }
-                CaptureHub.publishComparison(store, deals, matched.size)
+                publishCrossPlatform(context, store, counterpart, coupons)
             }
             PageType.SEARCH_RESULT -> CaptureHub.publishUnsupported("搜索结果页暂不支持")
             PageType.OTHER -> CaptureHub.publishUnsupported("该页面暂不支持")
         }
+    }
+
+    /**
+     * 用户在悬浮窗确认「疑似同品」后调用：用最新确认记忆重算两平台比价并重新发布。
+     * 数据取自内存缓存（最近的两平台同店数据），缓存缺失则静默放弃（下次采集自然会刷新）。
+     */
+    fun rematchWithConfirmed(context: Context) {
+        scope.launch {
+            runCatching {
+                val appContext = context.applicationContext
+                val current = latestByPlatform.values.maxByOrNull { it.capturedAt } ?: return@runCatching
+                val otherPlatform = if (current.platform == "meituan") "flash" else "meituan"
+                val counterpart = latestByPlatform[otherPlatform] ?: return@runCatching
+                val normalized = StoreMatcher.normalizeStoreName(current.storeName)
+                if (StoreMatcher.normalizeStoreName(counterpart.storeName) != normalized) return@runCatching
+                val coupons = runCatching {
+                    CouponRepository(appContext).list().map { Coupon(it.platform, it.threshold, it.amount) }
+                }.getOrDefault(emptyList())
+                publishCrossPlatform(appContext, current, counterpart, coupons)
+            }.onFailure { Log.w(TAG, "rematch failed", it) }
+        }
+    }
+
+    /** 跨平台比价：以自动配对成功的同品各一件为购物车两平台计价，疑似配对一并发布待确认。 */
+    private suspend fun publishCrossPlatform(
+        context: Context,
+        store: StoreInfo,
+        counterpart: StoreInfo,
+        coupons: List<Coupon>,
+    ) {
+        val confirmed = runCatching { MatchMemory(context).confirmedPairs() }.getOrDefault(emptySet())
+        val result = StoreMatcher.matchItems(store, counterpart, confirmed)
+        val cart = result.auto.map { CartItem(it.first.name, 1) }
+        val deals = PricingEngine.bestDeal(listOf(store, counterpart), cart, coupons)
+        if (deals.isEmpty()) {
+            CaptureHub.publishUnsupported("两平台均无法计算实付价")
+            return
+        }
+        CaptureHub.publishComparison(store, deals, result.auto.size, result.pending)
     }
 
     internal fun platformForPackage(pkg: String): String? = when (pkg) {
@@ -104,8 +137,8 @@ object CapturePipeline {
     }
 
     internal fun parseStore(platform: String, tree: SimpleNode): StoreInfo? = when (platform) {
-        "flash" -> FlashParser.parseStorePage(tree)
-        "meituan" -> MeituanParser.parseStorePage(tree)
+        "flash" -> safeParse(TAG) { FlashParser.parseStorePage(tree) }
+        "meituan" -> safeParse(TAG) { MeituanParser.parseStorePage(tree) }
         else -> null
     }
 

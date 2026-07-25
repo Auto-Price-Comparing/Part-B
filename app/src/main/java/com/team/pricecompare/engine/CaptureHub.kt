@@ -2,6 +2,7 @@ package com.team.pricecompare.engine
 
 import com.team.pricecompare.Deal
 import com.team.pricecompare.StoreInfo
+import com.team.pricecompare.engine.match.ItemMatch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,12 +22,13 @@ sealed class OverlayState {
         val hint: String,
     ) : OverlayState()
 
-    /** 同店跨平台比价。 */
+    /** 同店跨平台比价；[pending] 为疑似同品待用户确认的配对。 */
     data class Comparing(
         val storeName: String,
         val currentPlatform: String,
         val deals: List<Deal>,
         val matchedItemCount: Int,
+        val pending: List<ItemMatch> = emptyList(),
     ) : OverlayState()
 }
 
@@ -78,12 +80,14 @@ object CaptureHub {
         current: StoreInfo,
         deals: List<Deal>,
         matchedItemCount: Int,
+        pending: List<ItemMatch> = emptyList(),
     ) {
         val cheapest = deals.minByOrNull { it.finalPrice }
         lastSummary = buildString {
             append("${current.storeName} · 匹配${matchedItemCount}件 · ")
             append(deals.joinToString(" vs ") { "${platformLabel(it.platform)}¥${it.finalPrice}" })
             if (cheapest != null) append(" · 最低${platformLabel(cheapest.platform)}")
+            if (pending.isNotEmpty()) append(" · ${pending.size}对待确认")
         }
         lastUpdatedAt = System.currentTimeMillis()
         _state.value = OverlayState.Comparing(
@@ -91,6 +95,7 @@ object CaptureHub {
             currentPlatform = current.platform,
             deals = deals,
             matchedItemCount = matchedItemCount,
+            pending = pending,
         )
     }
 
