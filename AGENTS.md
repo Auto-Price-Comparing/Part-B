@@ -41,14 +41,19 @@ Android 手机端外卖多平台比价工具：通过**无障碍服务（Accessi
 ```
 app/src/main/java/<package>/
 ├── Models.kt            # 三方共享数据契约：StoreInfo / ItemPrice / Deal
+├── Morandi.kt           # 莫兰迪色板（C 侧移植）
+├── App.kt               # 进程入口：注册无障碍开关监听（OverlayController）
 ├── accessibility/       # 无障碍服务骨架：事件监听、节点树遍历工具、页面路由、手势工具
 │                        #   AutoCaptureController.kt：M4 一键全采编排（拉起→滑屏→入库）
-├── parsers/             # 平台解析器：meituan.kt / flash.kt
+├── parsers/             # 平台解析器：meituan.kt / flash.kt + SafeParse（统一容错）
 │                        #   节点路径与关键词常量集中在每个文件顶部常量区
 ├── launcher/            # AppLauncher.kt：包名/deep link 拉起、前台落地检测、超时重试
-├── engine/              # match（匹配）、pricing（实付价）、data（Room）、analysis（商家分析）
-├── overlay/             # 悬浮窗 UI
-└── MainActivity.kt      # 主界面：历史价格、商家分析、红包录入
+├── engine/              # match（三级判定配对 + MatchMemory 确认记忆）、pricing（实付价）、
+│                        #   data（Room v3：快照/红包/确认配对）、analysis（商家分析）
+├── overlay/             # OverlayService（前台服务悬浮窗：折叠/待确认交互）
+│                        #   OverlayController（无障碍开关监听 + 悬浮窗自动启停）
+├── ui/                  # ChartView.kt：价格走势折线图（纯 Canvas）
+└── MainActivity.kt      # 主界面：历史价格、商家分析（含走势图）、红包录入、保活引导
 fixtures/                # 真实节点树 dump 的 JSON（脱敏后），跨模块测试数据
 ```
 
@@ -134,6 +139,7 @@ data class Deal(val platform: String, val finalPrice: Double, val breakdown: Lis
 - **M3 商家分析**：已完成——`engine/analysis/PriceAnalyzer`（价格轨迹/评分销量趋势/变价检测），主界面红包录入 + 商家分析展示。
 - **M4 V2 一键全采（模拟手势自动驾驶各 App）**：已完成——`accessibility/AutoCaptureController.kt` 编排「拉起 → 落地 → 验证码检查 → 限速滑屏采集 → 多屏合并 → 流水线入库」；全采期间暂停常规节流 dump；命中验证码即停并提示人工。真机行为待实测回归。
 - **M5 保活适配 + 打磨**：已完成——① 修复悬浮窗数据链路（OverlayService 直接订阅 CaptureHub.state，原 companion + ACTION_REFRESH 协议无人接线已删除）；② 主界面显示无障碍服务存活状态，新增「关闭电池优化」「自启动/后台设置」引导按钮（国产 ROM 逐个尝试，兜底应用详情页）；③ 快照入库按内容去重（不含采集时间），停留同页不再刷库；④ 跨平台比价限定 2 小时新鲜度窗口；⑤ 悬浮窗标题展示数据更新时间。保活做到「可感知 + 一键引导」，不引入进程守护黑魔法。
+- **C 侧整合（Auto-Price-Comparing 仓库）**：已完成两批移植——① 确认配对机制（三级判定 + MatchMemory 持久化 + 悬浮窗「确认同品」交互）、SafeParse、OverlayController（无障碍开关监听 + 悬浮窗自动启停）、OverlayService 前台服务化（Android 14 specialUse 合规）；② 悬浮窗折叠交互、ChartView 价格走势图、莫兰迪主题。注意：C 侧源码未经编译验证，移植时修复了两处确凿错误（GradientDrawable 错误 import、OverlayController 顶层 Handler 初始化导致 JVM 单测崩溃），后续从该仓库取码必须在我们工程重新编译验证。
 
 ## 合规红线（AI 助手必须遵守）
 

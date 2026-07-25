@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- M1 悬浮窗比价卡片：标题行（店名 + 关闭）+ 比价行容器 + 无数据占位。
-     比价行由 OverlayService 按 Deal 列表动态填充到 overlay_deals_container。 -->
+<!-- 悬浮窗比价卡片：标题行（店名 + 折叠 + 关闭）+ 比价行容器 + 无数据占位。
+     比价行/待确认行由 OverlayService 按状态动态填充到 overlay_deals_container。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
@@ -9,7 +9,7 @@
     android:orientation="vertical"
     android:padding="12dp">
 
-    <!-- 标题行：店名 + 关闭按钮 -->
+    <!-- 标题行：店名 + 折叠按钮 + 关闭按钮 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -23,9 +23,19 @@
             android:layout_weight="1"
             android:ellipsize="end"
             android:singleLine="true"
-            android:textColor="#FFFFFF"
+            android:textColor="#ECE6DC"
             android:textSize="14sp"
             android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/overlay_collapse"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:padding="4dp"
+            android:text="—"
+            android:textColor="#B0AEA8"
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/overlay_close"
@@ -34,11 +44,12 @@
             android:layout_marginStart="8dp"
             android:padding="4dp"
             android:text="×"
-            android:textColor="#AAAAAA"
+            android:textColor="#B0AEA8"
             android:textSize="16sp" />
     </LinearLayout>
 
-    <!-- 比价行容器：每行 = 平台名 / 实付价 / 明细摘要，最低价钱行高亮 -->
+    <!-- 比价行容器：每行 = 平台名 / 实付价 / 明细摘要，最低价钱行高亮；
+         疑似同品的待确认行也加在这里 -->
     <LinearLayout
         android:id="@+id/overlay_deals_container"
         android:layout_width="match_parent"
@@ -53,6 +64,6 @@
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
         android:text="进入店铺菜单页后自动比价"
-        android:textColor="#FFFFFF"
+        android:textColor="#ECE6DC"
         android:textSize="13sp" />
 </LinearLayout>

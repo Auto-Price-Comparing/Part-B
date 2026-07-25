@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.TextView
 import android.widget.Toast
@@ -18,10 +19,12 @@ import com.team.pricecompare.engine.analysis.PriceAnalyzer
 import com.team.pricecompare.engine.analysis.StoreAnalysis
 import com.team.pricecompare.engine.data.CouponRepository
 import com.team.pricecompare.engine.data.SnapshotRepository
+import com.team.pricecompare.engine.data.toStoreInfo
 import com.team.pricecompare.launcher.AppLauncher
 import com.team.pricecompare.launcher.LaunchResult
 import com.team.pricecompare.overlay.OverlayController
 import com.team.pricecompare.overlay.OverlayService
+import com.team.pricecompare.ui.ChartView
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -213,21 +216,64 @@ class MainActivity : Activity() {
 
     private fun runAnalysis() {
         val view = findViewById<TextView>(R.id.tvAnalysis)
+        val container = findViewById<LinearLayout>(R.id.analysisContainer)
         view.text = "分析中…"
         scope.launch {
             val snapshots = runCatching { SnapshotRepository(this@MainActivity).latest() }
                 .getOrDefault(emptyList())
             if (snapshots.isEmpty()) {
                 view.text = "暂无快照，请先浏览店铺页"
+                container.removeAllViews()
                 return@launch
             }
             val analyses = PriceAnalyzer.analyze(snapshots)
-            view.text = if (analyses.isEmpty()) {
-                "快照数据无法解析"
-            } else {
-                analyses.joinToString("\n\n") { renderAnalysis(it) }
+            if (analyses.isEmpty()) {
+                view.text = "快照数据无法解析"
+                container.removeAllViews()
+                return@launch
+            }
+            view.text = "共 ${analyses.size} 组店铺数据"
+            val stores = snapshots.mapNotNull { it.toStoreInfo() }
+            val grouped = stores.groupBy { it.platform to it.storeName }
+            container.removeAllViews()
+            analyses.forEach { a ->
+                container.addView(
+                    TextView(this@MainActivity).apply {
+                        text = renderAnalysis(a)
+                        textSize = 13f
+                        setTextColor(Morandi.textMain)
+                        setPadding(0, 12, 0, 4)
+                    },
+                )
+                addTrendChart(container, grouped[a.platform to a.storeName].orEmpty())
             }
         }
+    }
+
+    /**
+     * 为单店挂价格走势图：取「数据点最多的商品」的价格轨迹（[PriceAnalyzer.itemPriceTrend]），
+     * 数据点不足 2 个时不显示图。
+     */
+    private fun addTrendChart(container: LinearLayout, stores: List<StoreInfo>) {
+        val best = stores.flatMap { it.items }.map { it.name }.distinct()
+            .map { name -> name to PriceAnalyzer.itemPriceTrend(stores, name) }
+            .filter { it.second.size >= 2 }
+            .maxByOrNull { it.second.size } ?: return
+        val dp = resources.displayMetrics.density
+        container.addView(
+            TextView(this).apply {
+                text = "「${best.first}」价格走势"
+                textSize = 12f
+                setTextColor(Morandi.textSub)
+            },
+        )
+        container.addView(
+            ChartView(this).apply { setPoints(best.second) },
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (160 * dp).toInt(),
+            ),
+        )
     }
 
     private fun renderAnalysis(a: StoreAnalysis): String = buildString {

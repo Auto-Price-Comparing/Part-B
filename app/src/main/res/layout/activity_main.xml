@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="#EDE7DE">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -166,5 +167,12 @@
             android:layout_height="wrap_content"
             android:text="尚未生成分析"
             android:textSize="13sp" />
+
+        <!-- 每店分析结果（文字报告 + 价格走势图）动态填充 -->
+        <LinearLayout
+            android:id="@+id/analysisContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
     </LinearLayout>
 </ScrollView>

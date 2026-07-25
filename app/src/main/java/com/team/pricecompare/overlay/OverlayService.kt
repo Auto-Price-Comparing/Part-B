@@ -7,7 +7,6 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.IBinder
 import android.util.TypedValue
@@ -16,13 +15,18 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.ServiceCompat
 import com.team.pricecompare.Deal
+import com.team.pricecompare.Morandi
 import com.team.pricecompare.R
 import com.team.pricecompare.engine.CaptureHub
+import com.team.pricecompare.engine.CapturePipeline
 import com.team.pricecompare.engine.OverlayState
+import com.team.pricecompare.engine.data.MatchMemory
+import com.team.pricecompare.engine.match.ItemMatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,7 +36,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ================= OVERLAY 常量区（样式/文案改动只改这里） =================
+// ================= OVERLAY 常量区（文案/展示名改动只改这里；配色见 Morandi） =================
 private object OverlayStyle {
     /** 无数据时的占位文案（兜底，M0 沿用）。 */
     const val PLACEHOLDER_TEXT = "比价助手运行中"
@@ -42,14 +46,6 @@ private object OverlayStyle {
 
     /** 平台名在卡片上的展示名。 */
     val PLATFORM_NAMES = mapOf("meituan" to "美团", "flash" to "淘宝闪购")
-
-    /** 常规文字色 / 明细摘要文字色。 */
-    const val TEXT_COLOR = "#FFFFFF"
-    const val SUB_TEXT_COLOR = "#AAAAAA"
-
-    /** 最低价行的实付价颜色与行背景色。 */
-    const val BEST_PRICE_COLOR = "#FFCC00"
-    const val BEST_ROW_BG_COLOR = "#33FFCC00"
 }
 // ============================================================================
 
@@ -58,7 +54,7 @@ private object OverlayStyle {
  *
  * 数据来源：直接订阅 [CaptureHub.state]（M5 起；原 companion 变量 + ACTION_REFRESH
  * 协议无人接线，已删除）。四种 [OverlayState] 各自渲染，任何状态下都不崩溃；
- * 可拖动；关闭按钮 stopSelf()。
+ * 可拖动、可折叠（C 侧交互移植）；关闭按钮 stopSelf()。
  *
  * C 侧整合起转为前台服务（specialUse 类型 + 低重要性通知），配合
  * [OverlayController] 按无障碍开关自动启停，提升保活能力。
@@ -68,6 +64,9 @@ class OverlayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val timeFormat = SimpleDateFormat("HH:mm", Locale.CHINA)
     private var cardView: View? = null
+
+    /** 折叠状态：折叠时只保留标题行（比价/待确认内容隐藏）。 */
+    private var collapsed = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -135,7 +134,13 @@ class OverlayService : Service() {
             }
         }
 
-        // 关闭按钮消费点击事件，不会触发整卡拖动
+        // 折叠/关闭按钮消费点击事件，不会触发整卡拖动
+        val collapseBtn = view.findViewById<TextView>(R.id.overlay_collapse)
+        collapseBtn.setOnClickListener {
+            collapsed = !collapsed
+            collapseBtn.text = if (collapsed) "＋" else "—"
+            applyCollapsed()
+        }
         view.findViewById<View>(R.id.overlay_close).setOnClickListener { stopSelf() }
 
         wm.addView(view, params)
@@ -145,6 +150,15 @@ class OverlayService : Service() {
         scope.launch {
             CaptureHub.state.collect { state -> render(state) }
         }
+    }
+
+    /** 折叠时隐藏内容区，只留标题行。 */
+    private fun applyCollapsed() {
+        val view = cardView ?: return
+        val visibility = if (collapsed) View.GONE else View.VISIBLE
+        view.findViewById<LinearLayout>(R.id.overlay_deals_container).visibility = visibility
+        val placeholder = view.findViewById<TextView>(R.id.overlay_placeholder)
+        if (collapsed || placeholder.text.isEmpty()) placeholder.visibility = View.GONE
     }
 
     /** 按状态渲染卡片；任何状态下都不抛异常（铁律：优雅降级）。 */
@@ -163,12 +177,12 @@ class OverlayService : Service() {
             is OverlayState.Waiting -> {
                 storeNameView.text = OverlayStyle.DEFAULT_TITLE
                 placeholder.text = OverlayStyle.PLACEHOLDER_TEXT
-                placeholder.visibility = View.VISIBLE
+                placeholder.visibility = if (collapsed) View.GONE else View.VISIBLE
             }
             is OverlayState.Unsupported -> {
                 storeNameView.text = OverlayStyle.DEFAULT_TITLE + timeSuffix
                 placeholder.text = state.message
-                placeholder.visibility = View.VISIBLE
+                placeholder.visibility = if (collapsed) View.GONE else View.VISIBLE
             }
             is OverlayState.SinglePlatform -> {
                 storeNameView.text = state.store.storeName.ifBlank { OverlayStyle.DEFAULT_TITLE } + timeSuffix
@@ -183,13 +197,14 @@ class OverlayService : Service() {
                 state.deals.forEach { deal ->
                     container.addView(buildDealRow(deal, isBest = deal.finalPrice == bestPrice))
                 }
-                val hint = buildString {
-                    append("已匹配 ${state.matchedItemCount} 件同品")
-                    if (state.pending.isNotEmpty()) append(" · ${state.pending.size} 对疑似同品待确认")
+                container.addView(buildHintRow("已匹配 ${state.matchedItemCount} 件同品"))
+                // 疑似同品：逐条提供人工确认入口（确认后永久按同品计价）
+                state.pending.forEach { match ->
+                    container.addView(buildPendingRow(match))
                 }
-                container.addView(buildHintRow(hint))
             }
         }
+        applyCollapsed()
     }
 
     /** 构造一行比价结果：上排「平台名 + 实付价」，下排明细摘要（折叠为单行）。 */
@@ -198,22 +213,18 @@ class OverlayService : Service() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(6), dp(4), dp(6), dp(4))
-            if (isBest) setBackgroundColor(Color.parseColor(OverlayStyle.BEST_ROW_BG_COLOR))
+            if (isBest) background = Morandi.card(this@OverlayService, Morandi.overlayBest, 8f)
         }
 
         val topLine = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         val platformView = TextView(this).apply {
             text = OverlayStyle.PLATFORM_NAMES[deal.platform] ?: deal.platform
-            setTextColor(Color.parseColor(OverlayStyle.TEXT_COLOR))
+            setTextColor(if (isBest) Morandi.overlayOnAccent else Morandi.overlayText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
         }
         val priceView = TextView(this).apply {
             text = "¥%.2f".format(deal.finalPrice)
-            setTextColor(
-                Color.parseColor(
-                    if (isBest) OverlayStyle.BEST_PRICE_COLOR else OverlayStyle.TEXT_COLOR,
-                ),
-            )
+            setTextColor(if (isBest) Morandi.overlayOnAccent else Morandi.overlayPrice)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setTypeface(typeface, android.graphics.Typeface.BOLD)
         }
@@ -225,7 +236,7 @@ class OverlayService : Service() {
 
         val summaryView = TextView(this).apply {
             text = deal.breakdown.joinToString("，")
-            setTextColor(Color.parseColor(OverlayStyle.SUB_TEXT_COLOR))
+            setTextColor(if (isBest) Morandi.overlayOnAccent else Morandi.overlaySub)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setSingleLine(true)
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -236,12 +247,45 @@ class OverlayService : Service() {
         return row
     }
 
+    /** 构造一行待确认配对：「A ⇋ B（相似度）」+ 确认按钮；确认落库后触发重算刷新。 */
+    private fun buildPendingRow(match: ItemMatch): View {
+        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+        }
+        val label = TextView(this).apply {
+            text = "%s ⇋ %s（%.0f%%）".format(match.a.name, match.b?.name ?: "?", match.similarity * 100)
+            setTextColor(Morandi.overlayWarn)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setSingleLine(true)
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        val confirmBtn = Button(this).apply {
+            text = "确认同品"
+            textSize = 11f
+        }
+        confirmBtn.setOnClickListener {
+            val bName = match.b?.name ?: return@setOnClickListener
+            confirmBtn.isEnabled = false
+            confirmBtn.text = "已确认"
+            scope.launch {
+                runCatching { MatchMemory(applicationContext).confirm(match.a.name, bName) }
+                CapturePipeline.rematchWithConfirmed(applicationContext)
+            }
+        }
+        row.addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(confirmBtn)
+        return row
+    }
+
     /** 构造一行灰色小字提示（单平台引导语 / 已匹配同品数）。 */
     private fun buildHintRow(hint: String): View {
         val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
         return TextView(this).apply {
             text = hint
-            setTextColor(Color.parseColor(OverlayStyle.SUB_TEXT_COLOR))
+            setTextColor(Morandi.overlaySub)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
             setPadding(dp(6), dp(2), dp(6), dp(4))
         }
