@@ -92,4 +92,51 @@ class StoreMatcherTest {
         val b = store("flash", "老乡鸡", items = listOf(ItemPrice("牛肉粉", 2.0, 0.0)))
         assertTrue(StoreMatcher.matchItems(a, b).isEmpty())
     }
+
+    @Test
+    fun `相似商品名可模糊配对`() {
+        val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("招牌肥西老母鸡汤", 18.0, 0.0)))
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("肥西老母鸡汤", 17.0, 0.0)))
+        val pairs = StoreMatcher.matchItems(a, b)
+        assertEquals(1, pairs.size)
+        assertEquals("招牌肥西老母鸡汤", pairs[0].first.name)
+        assertEquals("肥西老母鸡汤", pairs[0].second.name)
+    }
+
+    @Test
+    fun `完全不相关的商品模糊配对不上`() {
+        val a = store("meituan", "老乡鸡", items = listOf(ItemPrice("香辣鸡腿堡", 10.0, 0.0)))
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("红烧牛肉面", 10.0, 0.0)))
+        assertTrue(StoreMatcher.matchItems(a, b).isEmpty())
+    }
+
+    @Test
+    fun `一个 b 商品不会被重复配对`() {
+        // 「老母鸡汤」先完全相等占掉 b 侧唯一商品，「招牌老母鸡汤」模糊配对无路可走
+        val a = store(
+            "meituan", "老乡鸡",
+            items = listOf(
+                ItemPrice("招牌老母鸡汤", 18.0, 0.0),
+                ItemPrice("老母鸡汤", 15.0, 0.0),
+            ),
+        )
+        val b = store("flash", "老乡鸡", items = listOf(ItemPrice("老母鸡汤", 14.0, 0.0)))
+        val pairs = StoreMatcher.matchItems(a, b)
+        assertEquals(1, pairs.size)
+        assertEquals("老母鸡汤", pairs[0].first.name)
+    }
+
+    @Test
+    fun `itemSimilarity 边界值`() {
+        assertEquals(1.0, StoreMatcher.itemSimilarity("老母鸡汤", "老母鸡汤"), 0.0001)
+        // 归一化后相同也应为 1.0
+        assertEquals(1.0, StoreMatcher.itemSimilarity("老母鸡汤", " 老母鸡汤（小份）"), 0.0001)
+        // 完全不相关接近 0
+        assertTrue(StoreMatcher.itemSimilarity("鸡腿堡", "牛肉粉") < 0.1)
+        // 前缀差异但主体相同的相似度应达到模糊配对阈值
+        assertTrue(
+            StoreMatcher.itemSimilarity("招牌肥西老母鸡汤", "肥西老母鸡汤") >=
+                MatcherRules.ITEM_SIMILARITY_THRESHOLD,
+        )
+    }
 }

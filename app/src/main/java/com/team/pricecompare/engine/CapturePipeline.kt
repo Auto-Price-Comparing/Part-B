@@ -7,10 +7,12 @@ import com.team.pricecompare.accessibility.PageRouter
 import com.team.pricecompare.accessibility.PageType
 import com.team.pricecompare.accessibility.SimpleNode
 import com.team.pricecompare.engine.data.AppDatabase
+import com.team.pricecompare.engine.data.CouponRepository
 import com.team.pricecompare.engine.data.StoreInfoCodec
 import com.team.pricecompare.engine.data.StoreSnapshot
 import com.team.pricecompare.engine.match.StoreMatcher
 import com.team.pricecompare.engine.pricing.CartItem
+import com.team.pricecompare.engine.pricing.Coupon
 import com.team.pricecompare.engine.pricing.PricingEngine
 import com.team.pricecompare.parsers.FlashParser
 import com.team.pricecompare.parsers.MeituanParser
@@ -39,6 +41,10 @@ object CapturePipeline {
 
     private suspend fun processInternal(context: Context, pkg: String, tree: SimpleNode) {
         val platform = platformForPackage(pkg) ?: return
+        // 红包读取失败只丢红包，绝不允许拖垮整条流水线
+        val coupons = runCatching {
+            CouponRepository(context).list().map { Coupon(it.platform, it.threshold, it.amount) }
+        }.getOrDefault(emptyList())
         when (PageRouter.classify(platform, tree)) {
             PageType.STORE_MENU -> {
                 val store = parseStore(platform, tree)
@@ -51,7 +57,7 @@ object CapturePipeline {
                 val counterpart = findCounterpart(context, store)
                 if (counterpart == null) {
                     // 单平台场景：按「菜单每样一件」估算实付，算不出则降级提示
-                    val deal = PricingEngine.calcDeal(store, wholeMenuCart(store))
+                    val deal = PricingEngine.calcDeal(store, wholeMenuCart(store), coupons)
                     if (deal == null) CaptureHub.publishUnsupported("无法计算实付价")
                     else CaptureHub.publishSingle(store, deal)
                     return
@@ -59,7 +65,7 @@ object CapturePipeline {
                 // 跨平台场景：以匹配上的同品各一件为购物车，两平台分别计价
                 val matched = StoreMatcher.matchItems(store, counterpart)
                 val cart = matched.map { CartItem(it.first.name, 1) }
-                val deals = PricingEngine.bestDeal(listOf(store, counterpart), cart)
+                val deals = PricingEngine.bestDeal(listOf(store, counterpart), cart, coupons)
                 if (deals.isEmpty()) {
                     CaptureHub.publishUnsupported("两平台均无法计算实付价")
                     return

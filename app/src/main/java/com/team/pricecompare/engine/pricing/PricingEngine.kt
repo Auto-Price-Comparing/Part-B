@@ -14,21 +14,26 @@ object PricingRules {
 /** 购物车条目：商品名 + 数量。 */
 data class CartItem(val name: String, val quantity: Int)
 
+/** 红包：M2 计价叠加用，纯数据类（不依赖 Room），由上层从 CouponEntity 映射。 */
+data class Coupon(val platform: String, val threshold: Double, val amount: Double)
+
 /**
- * 实付价计算引擎 —— M1 版。
- * 实付价 = Σ(商品价 + 包装费) × 数量 + 配送费 - 满减优惠。
- * 满减是否可叠加 M1 不处理，只取满足门槛的最优一档；任何异常一律返回 null。
+ * 实付价计算引擎 —— M2 版。
+ * 实付价 = Σ(商品价 + 包装费) × 数量 + 配送费 - 满减优惠 - 红包。
+ * 满减只取满足门槛的最优一档；红包在满减之后再叠加一张该平台可用的
+ * 金额最大红包；任何异常一律返回 null。
  */
 object PricingEngine {
 
     /**
      * 计算某平台某门店对指定购物车的实付方案。
+     * [coupons] 为可选红包列表，不传时行为与 M1 完全一致。
      * 返回 null 的情形：
      * - 购物车为空，或商品在该店菜单中找不到（归一化商品名匹配不上）；
      * - 商品小计达不到起送价 [StoreInfo.minOrder]；
      * - 任何解析/计算异常（优雅降级铁律）。
      */
-    fun calcDeal(store: StoreInfo, cart: List<CartItem>): Deal? {
+    fun calcDeal(store: StoreInfo, cart: List<CartItem>, coupons: List<Coupon> = emptyList()): Deal? {
         return runCatching {
             if (cart.isEmpty()) return null
             val itemsByName = store.items.associateBy { StoreMatcher.normalizeStoreName(it.name) }
@@ -44,7 +49,8 @@ object PricingEngine {
             if (subtotal < store.minOrder) return null
 
             val reduction = bestFullReduction(store.discounts, subtotal)
-            val finalPrice = (subtotal + store.deliveryFee - (reduction?.second ?: 0.0))
+            val coupon = bestCoupon(coupons, store.platform, subtotal)
+            val finalPrice = (subtotal + store.deliveryFee - (reduction?.second ?: 0.0) - (coupon?.amount ?: 0.0))
                 .coerceAtLeast(0.0)
 
             val breakdown = mutableListOf<String>()
@@ -52,6 +58,9 @@ object PricingEngine {
             breakdown.add("配送费 ¥${store.deliveryFee}")
             if (reduction != null && reduction.second > 0.0) {
                 breakdown.add("满${fmt(reduction.first)}减${fmt(reduction.second)} -¥${reduction.second}")
+            }
+            if (coupon != null && coupon.amount > 0.0) {
+                breakdown.add("红包 -¥${coupon.amount}")
             }
             breakdown.add("实付 ¥$finalPrice")
 
@@ -63,8 +72,12 @@ object PricingEngine {
      * 对同店各平台分别计算实付方案，按 finalPrice 升序返回（最优在前）。
      * 算不出 Deal 的平台直接略过。
      */
-    fun bestDeal(stores: List<StoreInfo>, cart: List<CartItem>): List<Deal> =
-        stores.mapNotNull { calcDeal(it, cart) }.sortedBy { it.finalPrice }
+    fun bestDeal(
+        stores: List<StoreInfo>,
+        cart: List<CartItem>,
+        coupons: List<Coupon> = emptyList(),
+    ): List<Deal> =
+        stores.mapNotNull { calcDeal(it, cart, coupons) }.sortedBy { it.finalPrice }
 
     /**
      * 从满减文案列表中挑出「门槛 ≤ 小计」里减免额最高的一档。
@@ -77,6 +90,14 @@ object PricingEngine {
             val off = m.groupValues[2].toDoubleOrNull() ?: return@mapNotNull null
             if (subtotal >= threshold) threshold to off else null
         }.maxByOrNull { it.second }
+
+    /**
+     * 挑出该平台可用红包中金额最大的一张：平台一致且门槛 ≤ 商品小计。
+     * 没有可用红包时返回 null。
+     */
+    internal fun bestCoupon(coupons: List<Coupon>, platform: String, subtotal: Double): Coupon? =
+        coupons.filter { it.platform == platform && it.threshold <= subtotal }
+            .maxByOrNull { it.amount }
 
     /** 明细中的门槛/减免额展示：整数去掉小数部分（40.0 → "40"）。 */
     private fun fmt(v: Double): String =

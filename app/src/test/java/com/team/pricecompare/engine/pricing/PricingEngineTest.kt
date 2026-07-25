@@ -104,4 +104,82 @@ class PricingEngineTest {
         assertEquals(1, deals.size)
         assertEquals("flash", deals[0].platform)
     }
+
+    @Test
+    fun `红包叠加在满减之后`() {
+        val s = store(deliveryFee = 3.0, minOrder = 0.0, discounts = listOf("满40减12"))
+        // 小计 51.0，满减 12，红包 5
+        val deal = PricingEngine.calcDeal(
+            s,
+            listOf(CartItem("香辣鸡腿堡", 1), CartItem("老母鸡汤", 2)),
+            listOf(Coupon("meituan", 20.0, 5.0)),
+        )!!
+        assertEquals(51.0 + 3.0 - 12.0 - 5.0, deal.finalPrice, 0.001)
+        assertTrue(deal.breakdown.any { it == "红包 -¥5.0" })
+    }
+
+    @Test
+    fun `红包门槛不满足时不叠加`() {
+        val s = store(minOrder = 0.0)
+        // 小计 21.0 < 门槛 30.0
+        val deal = PricingEngine.calcDeal(
+            s,
+            listOf(CartItem("香辣鸡腿堡", 1)),
+            listOf(Coupon("meituan", 30.0, 5.0)),
+        )!!
+        assertEquals(21.0 + 3.0, deal.finalPrice, 0.001)
+        assertTrue(deal.breakdown.none { it.contains("红包") })
+    }
+
+    @Test
+    fun `多张可用红包取金额最大者`() {
+        val s = store(minOrder = 0.0)
+        val deal = PricingEngine.calcDeal(
+            s,
+            listOf(CartItem("香辣鸡腿堡", 1)),
+            listOf(
+                Coupon("meituan", 10.0, 3.0),
+                Coupon("meituan", 10.0, 5.0),
+                Coupon("meituan", 20.0, 4.0),
+            ),
+        )!!
+        assertEquals(21.0 + 3.0 - 5.0, deal.finalPrice, 0.001)
+        assertTrue(deal.breakdown.any { it == "红包 -¥5.0" })
+    }
+
+    @Test
+    fun `其他平台红包不生效`() {
+        val s = store(platform = "meituan", minOrder = 0.0)
+        val deal = PricingEngine.calcDeal(
+            s,
+            listOf(CartItem("香辣鸡腿堡", 1)),
+            listOf(Coupon("flash", 0.0, 5.0)),
+        )!!
+        assertEquals(21.0 + 3.0, deal.finalPrice, 0.001)
+        assertTrue(deal.breakdown.none { it.contains("红包") })
+    }
+
+    @Test
+    fun `不传红包时行为与旧版一致`() {
+        val s = store(deliveryFee = 3.0, minOrder = 0.0, discounts = listOf("满40减12"))
+        val deal = PricingEngine.calcDeal(
+            s,
+            listOf(CartItem("香辣鸡腿堡", 1), CartItem("老母鸡汤", 2)),
+        )!!
+        assertEquals(42.0, deal.finalPrice, 0.001)
+        assertEquals(4, deal.breakdown.size)
+        assertTrue(deal.breakdown.none { it.contains("红包") })
+    }
+
+    @Test
+    fun `bestDeal 支持红包参数`() {
+        val s = store(platform = "meituan", minOrder = 0.0)
+        val deals = PricingEngine.bestDeal(
+            listOf(s),
+            listOf(CartItem("香辣鸡腿堡", 1)),
+            listOf(Coupon("meituan", 0.0, 5.0)),
+        )
+        assertEquals(1, deals.size)
+        assertEquals(21.0 + 3.0 - 5.0, deals[0].finalPrice, 0.001)
+    }
 }
