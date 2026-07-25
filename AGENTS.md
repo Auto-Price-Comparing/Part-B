@@ -42,10 +42,11 @@ Android 手机端外卖多平台比价工具：通过**无障碍服务（Accessi
 app/src/main/java/<package>/
 ├── Models.kt            # 三方共享数据契约：StoreInfo / ItemPrice / Deal
 ├── accessibility/       # 无障碍服务骨架：事件监听、节点树遍历工具、页面路由、手势工具
+│                        #   AutoCaptureController.kt：M4 一键全采编排（拉起→滑屏→入库）
 ├── parsers/             # 平台解析器：meituan.kt / flash.kt
 │                        #   节点路径与关键词常量集中在每个文件顶部常量区
 ├── launcher/            # AppLauncher.kt：包名/deep link 拉起、前台落地检测、超时重试
-├── engine/              # match（匹配）、pricing（实付价）、data（Room）
+├── engine/              # match（匹配）、pricing（实付价）、data（Room）、analysis（商家分析）
 ├── overlay/             # 悬浮窗 UI
 └── MainActivity.kt      # 主界面：历史价格、商家分析、红包录入
 fixtures/                # 真实节点树 dump 的 JSON（脱敏后），跨模块测试数据
@@ -125,13 +126,13 @@ data class Deal(val platform: String, val finalPrice: Double, val breakdown: Lis
 - 给 AI 助手布置任务时，把 `Models.kt` 和相关 fixture 一并提供作为上下文。
 - 每周一次进度同步；解析器节点路径变更、接口字段调整须即时通知全组。
 
-## 里程碑（当前进度：M1）
+## 里程碑（当前进度：M4）
 
 - **M0 可行性验证（go/no-go）**：真机上用最小无障碍服务 dump 美团、淘宝闪购两个 App 的节点树，确认能读到店名和价格；两平台都通过才继续（闪购不过则验证淘宝内频道，再不过则降级手动录入）。
 - **M1 V1 实时跟随模式（浏览时悬浮窗即时比价）**：已集成——dump → 页面路由 → 解析 → Room 持久化 → 跨平台匹配 → 实付价估算 → 悬浮窗实时展示。
-- M2 匹配与最优策略
-- M3 商家分析
-- M4 V2 一键全采（模拟手势自动驾驶各 App）
+- **M2 匹配与最优策略**：已完成——商品名归一化完全相等配对 + 字符二元组 Jaccard 相似度兜底（阈值 0.5）；实付价在满减后叠加一张该平台可用的最大金额红包。
+- **M3 商家分析**：已完成——`engine/analysis/PriceAnalyzer`（价格轨迹/评分销量趋势/变价检测），主界面红包录入 + 商家分析展示。
+- **M4 V2 一键全采（模拟手势自动驾驶各 App）**：已完成——`accessibility/AutoCaptureController.kt` 编排「拉起 → 落地 → 验证码检查 → 限速滑屏采集 → 多屏合并 → 流水线入库」；全采期间暂停常规节流 dump；命中验证码即停并提示人工。真机行为待实测回归。
 - M5 保活适配 + 打磨
 
 ## 合规红线（AI 助手必须遵守）

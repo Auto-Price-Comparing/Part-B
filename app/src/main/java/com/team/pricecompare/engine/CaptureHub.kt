@@ -54,6 +54,11 @@ object CaptureHub {
         _state.value = OverlayState.Unsupported(message)
     }
 
+    /** M4 一键全采进度：只更新摘要文本，不改变悬浮窗的比价状态。 */
+    fun publishProgress(message: String) {
+        lastSummary = message
+    }
+
     fun publishSingle(store: StoreInfo, deal: Deal) {
         val hint = "暂无另一平台同店数据，请先去对比平台浏览该店"
         lastSummary = "${platformLabel(store.platform)} · ${store.storeName} · ¥${deal.finalPrice}"

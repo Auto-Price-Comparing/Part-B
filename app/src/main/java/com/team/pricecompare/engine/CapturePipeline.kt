@@ -39,6 +39,15 @@ object CapturePipeline {
         }
     }
 
+    /**
+     * M4 一键全采用：与 [process] 相同的逻辑，但 suspend 等待持久化/比价完成，
+     * 便于编排器顺序切换平台。失败同样优雅降级，不抛异常。
+     */
+    suspend fun processAwait(context: Context, pkg: String, tree: SimpleNode) {
+        runCatching { processInternal(context.applicationContext, pkg, tree) }
+            .onFailure { Log.w(TAG, "pipeline failed", it) }
+    }
+
     private suspend fun processInternal(context: Context, pkg: String, tree: SimpleNode) {
         val platform = platformForPackage(pkg) ?: return
         // 红包读取失败只丢红包，绝不允许拖垮整条流水线

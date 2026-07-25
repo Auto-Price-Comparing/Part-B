@@ -1,45 +1,158 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:layout_height="match_parent">
 
-    <TextView
-        android:id="@+id/tvStatus"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:text="状态：未刷新"
-        android:textSize="14sp" />
+        android:orientation="vertical"
+        android:padding="24dp">
 
-    <Button
-        android:id="@+id/btnAccessibility"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="1. 开启无障碍服务" />
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="状态：未刷新"
+            android:textSize="14sp" />
 
-    <Button
-        android:id="@+id/btnOverlayPerm"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="2. 开启悬浮窗权限" />
+        <Button
+            android:id="@+id/btnAccessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. 开启无障碍服务" />
 
-    <Button
-        android:id="@+id/btnShowOverlay"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="3. 显示比价悬浮窗" />
+        <Button
+            android:id="@+id/btnOverlayPerm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. 开启悬浮窗权限" />
 
-    <Button
-        android:id="@+id/btnLaunchFlash"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="4. 拉起淘宝闪购（M0 测试）" />
+        <Button
+            android:id="@+id/btnShowOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3. 显示比价悬浮窗" />
 
-    <Button
-        android:id="@+id/btnRefreshStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="刷新状态（前台包名 / 最近 dump）" />
-</LinearLayout>
+        <Button
+            android:id="@+id/btnLaunchFlash"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="4. 拉起淘宝闪购（M0 测试）" />
+
+        <Button
+            android:id="@+id/btnAutoCapture"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="5. 一键全采（M4）" />
+
+        <Button
+            android:id="@+id/btnRefreshStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="刷新状态（前台包名 / 最近 dump）" />
+
+        <!-- M3 红包录入 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="红包录入（M3）"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgCouponPlatform"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <RadioButton
+                android:id="@+id/rbCouponMeituan"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="美团" />
+
+            <RadioButton
+                android:id="@+id/rbCouponFlash"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="淘宝闪购" />
+        </RadioGroup>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <EditText
+                android:id="@+id/etCouponThreshold"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="门槛（满多少可用）"
+                android:inputType="numberDecimal"
+                android:importantForAutofill="no" />
+
+            <EditText
+                android:id="@+id/etCouponAmount"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:hint="金额（减多少）"
+                android:inputType="numberDecimal"
+                android:importantForAutofill="no" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCouponSave"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="录入红包" />
+
+            <Button
+                android:id="@+id/btnCouponClear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="清空红包" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvCouponList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="暂无红包"
+            android:textSize="13sp" />
+
+        <!-- M3 商家分析 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="商家分析（M3）"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnAnalyze"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="生成商家分析" />
+
+        <TextView
+            android:id="@+id/tvAnalysis"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="尚未生成分析"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>
