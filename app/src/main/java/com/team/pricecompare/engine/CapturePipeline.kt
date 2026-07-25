@@ -22,15 +22,26 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
+// ================= 流水线常量区（口径调整只改这里） =================
+object PipelineRules {
+    /** 跨平台比价对侧数据的新鲜度窗口：超过该时长的快照不参与比价（价格可能已变）。 */
+    const val COUNTERPART_FRESHNESS_MS = 2 * 60 * 60 * 1000L
+}
+// ============================================================================
+
 /**
  * M1 采集流水线：页面路由 → 解析 → Room 持久化 → 跨平台匹配 → 实付价估算 → CaptureHub 发布。
  * 由 DumpAccessibilityService 在 dump 后调用；失败一律优雅降级，不抛未捕获异常。
+ * M5 起：入库前按内容去重（停留同一页面不再刷库），对侧比价数据限定新鲜度窗口。
  */
 object CapturePipeline {
 
     private const val TAG = "CapturePipeline"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val latestByPlatform = ConcurrentHashMap<String, StoreInfo>()
+
+    /** 各平台最近一次成功入库的内容键（不含采集时间），用于快照去重。 */
+    private val lastPersistedByPlatform = ConcurrentHashMap<String, String>()
 
     fun process(context: Context, pkg: String, tree: SimpleNode) {
         scope.launch {
@@ -102,7 +113,13 @@ object CapturePipeline {
     private fun wholeMenuCart(store: StoreInfo): List<CartItem> =
         store.items.map { CartItem(it.name, 1) }
 
+    /**
+     * 入库前去重：与该平台上次入库内容（不含采集时间）一致则跳过，
+     * 避免停留同一页面时节流 dump 刷出大量重复快照、污染 M3 分析口径。
+     */
     private suspend fun persist(context: Context, store: StoreInfo) {
+        val contentKey = StoreInfoCodec.toJson(store.copy(capturedAt = 0L))
+        if (isDuplicateSnapshot(lastPersistedByPlatform[store.platform], contentKey)) return
         AppDatabase.get(context).storeDao().insert(
             StoreSnapshot(
                 platform = store.platform,
@@ -111,18 +128,34 @@ object CapturePipeline {
                 capturedAt = store.capturedAt,
             ),
         )
+        lastPersistedByPlatform[store.platform] = contentKey
     }
 
+    /** 去重判定：两次内容键（不含采集时间）完全一致视为重复快照。 */
+    internal fun isDuplicateSnapshot(lastKey: String?, newKey: String?): Boolean =
+        lastKey != null && lastKey == newKey
+
+    /** 新鲜度判定：采集时间落在 [now - 窗口, now] 内（含边界）视为新鲜。 */
+    internal fun isSnapshotFresh(capturedAt: Long, now: Long): Boolean =
+        now - capturedAt in 0..PipelineRules.COUNTERPART_FRESHNESS_MS
+
+    /** 找另一平台的同店数据；超过新鲜度窗口的一律视为无对侧数据（价格可能已变）。 */
     private suspend fun findCounterpart(context: Context, current: StoreInfo): StoreInfo? {
         val otherPlatform = if (current.platform == "meituan") "flash" else "meituan"
         val normalized = StoreMatcher.normalizeStoreName(current.storeName)
+        val now = System.currentTimeMillis()
 
         latestByPlatform[otherPlatform]?.let { cached ->
-            if (StoreMatcher.normalizeStoreName(cached.storeName) == normalized) return cached
+            if (StoreMatcher.normalizeStoreName(cached.storeName) == normalized &&
+                isSnapshotFresh(cached.capturedAt, now)
+            ) {
+                return cached
+            }
         }
 
         for (snap in AppDatabase.get(context).storeDao().latest()) {
             if (snap.platform != otherPlatform) continue
+            if (!isSnapshotFresh(snap.capturedAt, now)) continue
             val store = runCatching { StoreInfoCodec.fromJson(snap.payloadJson) }.getOrNull() ?: continue
             if (StoreMatcher.normalizeStoreName(store.storeName) == normalized) return store
         }

@@ -1,9 +1,11 @@
 package com.team.pricecompare
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Button
 import android.widget.EditText
@@ -84,6 +86,9 @@ class MainActivity : Activity() {
 
         findViewById<Button>(R.id.btnRefreshStatus).setOnClickListener { refreshStatus() }
 
+        findViewById<Button>(R.id.btnBatteryOpt).setOnClickListener { requestIgnoreBatteryOpt() }
+        findViewById<Button>(R.id.btnAutoStart).setOnClickListener { openAutoStartSettings() }
+
         findViewById<Button>(R.id.btnCouponSave).setOnClickListener { saveCoupon() }
         findViewById<Button>(R.id.btnCouponClear).setOnClickListener {
             scope.launch {
@@ -104,11 +109,63 @@ class MainActivity : Activity() {
     }
 
     private fun refreshStatus() {
+        val serviceAlive = DumpAccessibilityService.instance != null
+        val serviceStatus =
+            if (serviceAlive) "运行中" else "未运行（可能被系统杀死，请重新开启）"
         val foreground = DumpAccessibilityService.foregroundPackage ?: "未知（无障碍服务未开启？）"
         val dump = DumpAccessibilityService.lastDumpFile ?: "暂无 dump"
         val compare = CaptureHub.lastSummary
         findViewById<TextView>(R.id.tvStatus).text =
-            "前台包名：$foreground\n最近 dump：$dump\n比价状态：$compare\n\ndump 导出：adb pull /sdcard/Android/data/$packageName/files/dumps/"
+            "无障碍服务：$serviceStatus\n前台包名：$foreground\n最近 dump：$dump\n比价状态：$compare\n\ndump 导出：adb pull /sdcard/Android/data/$packageName/files/dumps/"
+    }
+
+    // ================= M5 保活引导 =================
+
+    /** 引导用户把本 App 加入电池优化白名单；已在白名单则直接提示。 */
+    private fun requestIgnoreBatteryOpt() {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            toast("已在电池优化白名单中")
+            return
+        }
+        val request = Intent(
+            Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+            Uri.parse("package:$packageName"),
+        )
+        runCatching { startActivity(request) }.onFailure {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                .onFailure { toast("无法打开电池优化设置，请手动前往系统设置") }
+        }
+    }
+
+    /**
+     * 跳转国产 ROM 的自启动/后台管理页：按厂商逐个尝试常见 intent，
+     * 全部失败兜底跳本应用系统详情页（用户可自行找「自启动/电池」入口）。
+     */
+    private fun openAutoStartSettings() {
+        val candidates = listOf(
+            // 小米
+            "com.miui.securitycenter/com.miui.permcenter.autostart.AutoStartManagementActivity",
+            // 华为/荣耀
+            "com.huawei.systemmanager/.startupmgr.ui.StartupNormalAppListActivity",
+            "com.huawei.systemmanager/.appcontrol.activity.StartupAppControlActivity",
+            // OPPO
+            "com.coloros.safecenter/.startupapp.StartupAppListActivity",
+            "com.oplus.safecenter/.startupapp.StartupAppListActivity",
+            // vivo
+            "com.iqoo.secure/.ui.phoneoptimize.AddWhiteListActivity",
+            "com.vivo.permissionmanager/.activity.BgStartUpManagerActivity",
+        )
+        for (c in candidates) {
+            val (pkg, cls) = c.split("/", limit = 2).let { it[0] to it[1] }
+            val intent = Intent().setClassName(pkg, if (cls.startsWith(".")) "$pkg$cls" else cls)
+            if (runCatching { startActivity(intent) }.isSuccess) return
+        }
+        runCatching {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")),
+            )
+        }.onFailure { toast("无法打开设置页，请手动前往系统设置") }
     }
 
     // ================= M3 红包录入 =================

@@ -16,6 +16,16 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.team.pricecompare.Deal
 import com.team.pricecompare.R
+import com.team.pricecompare.engine.CaptureHub
+import com.team.pricecompare.engine.OverlayState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // ================= OVERLAY 常量区（样式/文案改动只改这里） =================
 private object OverlayStyle {
@@ -39,26 +49,22 @@ private object OverlayStyle {
 // ============================================================================
 
 /**
- * M1 悬浮窗比价卡片：展示同一店铺跨平台的实付价对比。
+ * 悬浮窗比价卡片：展示同一店铺跨平台的实付价对比。
  *
- * 数据来源（C 侧消费方式，采集→引擎→悬浮窗的串联通路由主线程后续接线）：
- * 引擎算好 List<Deal> 后，先赋值 companion 变量 [latestStoreName] / [latestDeals]，
- * 再 `startService(Intent(context, OverlayService::class.java).setAction(ACTION_REFRESH))`，
- * 服务收到 [ACTION_REFRESH] 后把最新数据重新 bind 到已存在的卡片视图上。
- *
- * 铁律遵守：数据为空时显示占位文案优雅降级，绝不崩溃；可拖动；关闭按钮 stopSelf()。
+ * 数据来源：直接订阅 [CaptureHub.state]（M5 起；原 companion 变量 + ACTION_REFRESH
+ * 协议无人接线，已删除）。四种 [OverlayState] 各自渲染，任何状态下都不崩溃；
+ * 可拖动；关闭按钮 stopSelf()。
  */
 class OverlayService : Service() {
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val timeFormat = SimpleDateFormat("HH:mm", Locale.CHINA)
     private var cardView: View? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         showCard()
-        if (intent?.action == ACTION_REFRESH) {
-            bindCard()
-        }
         return START_STICKY
     }
 
@@ -105,30 +111,51 @@ class OverlayService : Service() {
 
         wm.addView(view, params)
         cardView = view
-        bindCard()
+
+        // 订阅引擎状态总线：采集/比价结果实时刷到卡片上
+        scope.launch {
+            CaptureHub.state.collect { state -> render(state) }
+        }
     }
 
-    /** 把 companion 中的最新数据刷到卡片上；deals 为空显示占位文案。 */
-    private fun bindCard() {
+    /** 按状态渲染卡片；任何状态下都不抛异常（铁律：优雅降级）。 */
+    private fun render(state: OverlayState) {
         val view = cardView ?: return
         val storeNameView = view.findViewById<TextView>(R.id.overlay_store_name)
         val placeholder = view.findViewById<TextView>(R.id.overlay_placeholder)
         val container = view.findViewById<LinearLayout>(R.id.overlay_deals_container)
-
-        val deals = latestDeals.orEmpty()
-        storeNameView.text = latestStoreName?.takeIf { it.isNotBlank() }
-            ?: OverlayStyle.DEFAULT_TITLE
         container.removeAllViews()
 
-        if (deals.isEmpty()) {
-            placeholder.visibility = View.VISIBLE
-            return
-        }
-        placeholder.visibility = View.GONE
+        val updatedAt = CaptureHub.lastUpdatedAt
+        val timeSuffix =
+            if (updatedAt > 0L) " · 更新 ${timeFormat.format(Date(updatedAt))}" else ""
 
-        val bestPrice = deals.minOf { it.finalPrice }
-        deals.forEach { deal ->
-            container.addView(buildDealRow(deal, isBest = deal.finalPrice == bestPrice))
+        when (state) {
+            is OverlayState.Waiting -> {
+                storeNameView.text = OverlayStyle.DEFAULT_TITLE
+                placeholder.text = OverlayStyle.PLACEHOLDER_TEXT
+                placeholder.visibility = View.VISIBLE
+            }
+            is OverlayState.Unsupported -> {
+                storeNameView.text = OverlayStyle.DEFAULT_TITLE + timeSuffix
+                placeholder.text = state.message
+                placeholder.visibility = View.VISIBLE
+            }
+            is OverlayState.SinglePlatform -> {
+                storeNameView.text = state.store.storeName.ifBlank { OverlayStyle.DEFAULT_TITLE } + timeSuffix
+                placeholder.visibility = View.GONE
+                container.addView(buildDealRow(state.deal, isBest = true))
+                container.addView(buildHintRow(state.hint))
+            }
+            is OverlayState.Comparing -> {
+                storeNameView.text = state.storeName.ifBlank { OverlayStyle.DEFAULT_TITLE } + timeSuffix
+                placeholder.visibility = View.GONE
+                val bestPrice = state.deals.minOf { it.finalPrice }
+                state.deals.forEach { deal ->
+                    container.addView(buildDealRow(deal, isBest = deal.finalPrice == bestPrice))
+                }
+                container.addView(buildHintRow("已匹配 ${state.matchedItemCount} 件同品"))
+            }
         }
     }
 
@@ -176,22 +203,21 @@ class OverlayService : Service() {
         return row
     }
 
+    /** 构造一行灰色小字提示（单平台引导语 / 已匹配同品数）。 */
+    private fun buildHintRow(hint: String): View {
+        val dp = { v: Int -> (v * resources.displayMetrics.density).toInt() }
+        return TextView(this).apply {
+            text = hint
+            setTextColor(Color.parseColor(OverlayStyle.SUB_TEXT_COLOR))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            setPadding(dp(6), dp(2), dp(6), dp(4))
+        }
+    }
+
     override fun onDestroy() {
+        scope.cancel()
         cardView?.let { (getSystemService(WINDOW_SERVICE) as WindowManager).removeView(it) }
         cardView = null
         super.onDestroy()
-    }
-
-    companion object {
-        /** 通知悬浮窗重新读取 companion 变量并刷新卡片。 */
-        const val ACTION_REFRESH = "com.team.pricecompare.action.REFRESH_OVERLAY"
-
-        /** 引擎写入：当前比价店铺名；null 时标题回落为默认文案。 */
-        @Volatile
-        var latestStoreName: String? = null
-
-        /** 引擎写入：各平台实付价结果；null/空列表时显示占位文案。 */
-        @Volatile
-        var latestDeals: List<Deal>? = null
     }
 }

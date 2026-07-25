@@ -44,24 +44,33 @@ object CaptureHub {
     var lastSummary: String = "等待进入店铺菜单页…"
         private set
 
+    /** 最近一次状态发布时间戳，供悬浮窗展示「更新于 HH:mm」。 */
+    @Volatile
+    var lastUpdatedAt: Long = 0L
+        private set
+
     fun publishWaiting() {
         lastSummary = "等待进入店铺菜单页…"
+        lastUpdatedAt = System.currentTimeMillis()
         _state.value = OverlayState.Waiting
     }
 
     fun publishUnsupported(message: String) {
         lastSummary = message
+        lastUpdatedAt = System.currentTimeMillis()
         _state.value = OverlayState.Unsupported(message)
     }
 
     /** M4 一键全采进度：只更新摘要文本，不改变悬浮窗的比价状态。 */
     fun publishProgress(message: String) {
         lastSummary = message
+        lastUpdatedAt = System.currentTimeMillis()
     }
 
     fun publishSingle(store: StoreInfo, deal: Deal) {
         val hint = "暂无另一平台同店数据，请先去对比平台浏览该店"
         lastSummary = "${platformLabel(store.platform)} · ${store.storeName} · ¥${deal.finalPrice}"
+        lastUpdatedAt = System.currentTimeMillis()
         _state.value = OverlayState.SinglePlatform(store, deal, hint)
     }
 
@@ -76,6 +85,7 @@ object CaptureHub {
             append(deals.joinToString(" vs ") { "${platformLabel(it.platform)}¥${it.finalPrice}" })
             if (cheapest != null) append(" · 最低${platformLabel(cheapest.platform)}")
         }
+        lastUpdatedAt = System.currentTimeMillis()
         _state.value = OverlayState.Comparing(
             storeName = current.storeName,
             currentPlatform = current.platform,

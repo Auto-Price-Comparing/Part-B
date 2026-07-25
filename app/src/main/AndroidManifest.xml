@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 保活：引导用户把本 App 加入电池优化白名单（自用侧载，无上架政策顾虑） -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Android 11+ 包可见性：不声明则检测不到/拉不起目标 App（见 AGENTS.md） -->
     <queries>

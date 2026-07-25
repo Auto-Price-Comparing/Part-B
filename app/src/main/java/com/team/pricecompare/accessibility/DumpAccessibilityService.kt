@@ -59,6 +59,7 @@ class DumpAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         instance = this
+        CaptureHub.publishProgress("无障碍服务已连接")
         super.onServiceConnected()
     }
 

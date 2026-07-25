@@ -48,6 +48,18 @@
             android:text="5. 一键全采（M4）" />
 
         <Button
+            android:id="@+id/btnBatteryOpt"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="6. 关闭电池优化（保活）" />
+
+        <Button
+            android:id="@+id/btnAutoStart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="7. 自启动/后台运行设置" />
+
+        <Button
             android:id="@+id/btnRefreshStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
