@@ -1,0 +1,12 @@
+# 构建产物
+.gradle/
+build/
+app/build/
+
+# 本机环境（路径因机器而异，见 README 环境一节）
+local.properties
+
+# IDE
+.idea/
+*.iml
+.cxx/

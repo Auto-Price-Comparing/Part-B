@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:text="状态：未刷新"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btnAccessibility"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="1. 开启无障碍服务" />
+
+    <Button
+        android:id="@+id/btnOverlayPerm"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="2. 开启悬浮窗权限" />
+
+    <Button
+        android:id="@+id/btnShowOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="3. 显示比价悬浮窗" />
+
+    <Button
+        android:id="@+id/btnLaunchFlash"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="4. 拉起淘宝闪购（M0 测试）" />
+
+    <Button
+        android:id="@+id/btnRefreshStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="刷新状态（前台包名 / 最近 dump）" />
+</LinearLayout>

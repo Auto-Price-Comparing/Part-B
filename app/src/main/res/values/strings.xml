@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">外卖比价助手</string>
+    <string name="accessibility_desc">读取美团/淘宝闪购页面价格，用于多平台比价（仅团队自用）</string>
+</resources>

@@ -1,0 +1,23 @@
+{
+  "text": "",
+  "class": "android.widget.FrameLayout",
+  "id": "",
+  "bounds": "0,0,1080,2400",
+  "children": [
+    { "text": "老乡鸡(示例店)", "class": "android.widget.TextView", "id": "", "bounds": "0,100,500,160", "children": [] },
+    {
+      "text": "", "class": "android.view.ViewGroup", "id": "", "bounds": "0,400,1080,600",
+      "children": [
+        { "text": "香辣鸡腿堡", "class": "android.widget.TextView", "id": "", "bounds": "0,400,400,460", "children": [] },
+        { "text": "¥19.9", "class": "android.widget.TextView", "id": "", "bounds": "800,400,1000,460", "children": [] }
+      ]
+    },
+    {
+      "text": "", "class": "android.view.ViewGroup", "id": "", "bounds": "0,600,1080,800",
+      "children": [
+        { "text": "老母鸡汤", "class": "android.widget.TextView", "id": "", "bounds": "0,600,400,660", "children": [] },
+        { "text": "¥15.0", "class": "android.widget.TextView", "id": "", "bounds": "800,600,1000,660", "children": [] }
+      ]
+    }
+  ]
+}
